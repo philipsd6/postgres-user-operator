@@ -30,7 +30,12 @@ def probe_ok(**kwargs):
 
 def hide_secrets(s, secrets=None):
     for secret in secrets or []:
-        s = s.replace(secret, "*" * 8)
+        try:
+            s = s.replace(secret, "*" * 8)
+        except TypeError:
+            continue  # secret is not a string
+        except AttributeError:
+            break  # s is not a string
     return s
 
 
