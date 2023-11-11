@@ -3,6 +3,7 @@
 
 import asyncio
 import os
+from base64 import b64decode
 
 import kopf
 from kubernetes import config
@@ -47,7 +48,7 @@ def get_from_secret(namespace, name, key):
         if e.status == 404:
             return None
         raise
-    return secret.data[key]
+    return b64decode(secret.data[key]).decode("utf-8").strip()
 
 
 def get_from_configmap(namespace, name, key):
