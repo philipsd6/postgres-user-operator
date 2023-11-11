@@ -1,0 +1,12 @@
+---
+apiVersion: philipdouglass.com/v1
+kind: PostgreSQLUser
+metadata:
+  name: sampleuser
+  namespace: default
+  labels:
+    app.kubernetes.io/name: sampleapp
+spec:
+  db: sampledb
+  username: sampleuser
+  password: my-secret-password

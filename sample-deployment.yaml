@@ -1,0 +1,36 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: pguser-operator
+  labels:
+    app: pguser-operator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: pguser-operator
+  template:
+    metadata:
+      labels:
+        app: pguser-operator
+    spec:
+      containers:
+        - name: pguser-operator
+          image: ghcr.io/philipsd6/postgres-user-operator
+          imagePullPolicy: Always
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 15
+            timeoutSeconds: 1
+          env:
+            - name: OPERATOR_NAME
+              value: pguser-operator
+            - name: POSTGRES_USERNAME
+              value: postgres
+            - name: POSTGRES_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
