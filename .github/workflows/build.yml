@@ -26,7 +26,7 @@ jobs:
         uses: redhat-actions/buildah-build@v2
         with:
           image: ${{ env.IMAGE_NAME }}
-          tags: latest ${{ github.ref_name }} ${{ github.sha }}
+          tags: latest ${{ github.sha }}
           containerfiles: |
             ./Containerfile
 
