@@ -10,6 +10,8 @@ from kopf.testing import KopfRunner
 def test_pguser():
     with KopfRunner(["run", "pguser.py", "--all-namespaces"]) as runner:
         time.sleep(1)
+        subprocess.run(["kubectl", "apply", "-f", "sample-secret.yaml"], check=True)
+        time.sleep(1)
         subprocess.run(["kubectl", "apply", "-f", "sample-pguser.yaml"], check=True)
         time.sleep(1)
         subprocess.run(
@@ -17,7 +19,7 @@ def test_pguser():
                 "kubectl",
                 "patch",
                 "pguser",
-                "sampleuser",
+                "samplepguser",
                 "--type",
                 "merge",
                 "-p",
@@ -25,7 +27,7 @@ def test_pguser():
             ],
             check=True,
         )
-        time.sleep(5)
+        time.sleep(1)
         subprocess.run(["kubectl", "delete", "-f", "sample-pguser.yaml"], check=True)
         time.sleep(1)
 
@@ -37,8 +39,6 @@ def test_pguser():
     assert "CREATE DATABASE" in runner.stdout
     assert "ALTER ROLE" in runner.stdout
     assert "ALTER DATABASE" in runner.stdout
-    assert "DROP DATABASE" in runner.stdout
-    assert "DROP ROLE" in runner.stdout
     assert "does not exist" not in runner.stdout
 
     # This assertion is only valid if running with --verbose

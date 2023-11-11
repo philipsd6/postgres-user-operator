@@ -2,11 +2,22 @@
 apiVersion: philipdouglass.com/v1
 kind: PostgreSQLUser
 metadata:
-  name: sampleuser
-  namespace: default
+  name: samplepguser
   labels:
     app.kubernetes.io/name: sampleapp
 spec:
   db: sampledb
   username: sampleuser
-  password: my-secret-password
+  # Or using a configmap:
+  # username:
+  #   valueFrom:
+  #     configKeyRef:
+  #       name: sample-username
+  #       key: sampleuser
+  # password: my-secret-password
+  # Prefer using a secret:
+  password:
+    valueFrom:
+      secretKeyRef:
+        name: sample-secret
+        key: sample-password

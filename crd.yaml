@@ -5,21 +5,9 @@ metadata:
   # name must match the spec fields below, and be in the form: <plural>.<group>
   name: postgresqlusers.philipdouglass.com
 spec:
-  # either Namespaced or Cluster
-  scope: Cluster
   # group name to use for REST API: /apis/<group>/<version>
   group: philipdouglass.com
-  names:
-    # kind is normally the CamelCased singular type. Your resource manifests use this.
-    kind: PostgreSQLUser
-    # plural name to be used in the URL: /apis/<group>/<version>/<plural>
-    plural: postgresqlusers
-    # singular name to be used as an alias on the CLI and for display
-    singular: postgresqluser
-    # shortNames allow shorter string to match your resource on the CLI
-    shortNames:
-      - pguser
-      - pgusers
+  # list of versions supported by this CustomResourceDefinition
   versions:
     - name: v1
       # Each version can be enabled/disabled by Served flag.
@@ -29,22 +17,36 @@ spec:
       schema:
         openAPIV3Schema:
           type: object
+          required: ["spec"]
           properties:
             spec:
               type: object
-              properties:
-                db:
-                  type: string
-                username:
-                  type: string
-                password:
-                  type: string
+              # The datatype must be unspecified; it could be either a string or an
+              # object, and that's not structural.
+              x-kubernetes-preserve-unknown-fields: true
             status:
               type: object
               x-kubernetes-preserve-unknown-fields: true
       additionalPrinterColumns:
+        - name: Status
+          type: string
+          description: The status of the PostgreSQLUser
+          jsonPath: .status.phase
         - name: Message
           type: string
           priority: 0
           jsonPath: .status.create.message
           description: As returned from the handler (sometimes).
+  # either Namespaced or Cluster
+  scope: Namespaced
+  names:
+    # plural name to be used in the URL: /apis/<group>/<version>/<plural>
+    plural: postgresqlusers
+    # singular name to be used as an alias on the CLI and for display
+    singular: postgresqluser
+    # kind is normally the CamelCased singular type. Your resource manifests use this.
+    kind: PostgreSQLUser
+    # shortNames allow shorter string to match your resource on the CLI
+    shortNames:
+      - pguser
+      - pgusers

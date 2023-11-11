@@ -3,9 +3,8 @@
 
 import asyncio
 import os
+
 import kopf
-
-
 from kubernetes import config
 from kubernetes.client import Configuration
 from kubernetes.client.api import core_v1_api
@@ -16,6 +15,12 @@ from kubernetes.stream import stream
 # is running under to run psql as that user.
 POSTGRES_USERNAME = os.environ.get("POSTGRES_USERNAME", "postgres")
 POSTGRES_NAMESPACE = os.environ.get("POSTGRES_NAMESPACE", "postgres")
+
+# Load the kubernetes configuration from the cluster (or locally for testing)
+try:
+    config.load_incluster_config()
+except config.ConfigException:
+    config.load_kube_config()
 
 
 @kopf.on.probe(id="ok")
@@ -29,15 +34,49 @@ def hide_secrets(s, secrets=None):
     return s
 
 
-def psql(*ddl, logger, secrets=None):
-    # Load my config, and create an API client
-    try:
-        config.load_incluster_config()
-    except config.ConfigException:
-        config.load_kube_config()
-
+def get_from_secret(namespace, name, key):
     core_v1 = core_v1_api.CoreV1Api()
+    try:
+        secret = core_v1.read_namespaced_secret(name, namespace)
+    except ApiException as e:
+        if e.status == 404:
+            return None
+        raise
+    return secret.data[key]
 
+
+def get_from_configmap(namespace, name, key):
+    core_v1 = core_v1_api.CoreV1Api()
+    try:
+        configmap = core_v1.read_namespaced_config_map(name, namespace)
+    except ApiException as e:
+        if e.status == 404:
+            return None
+        raise
+    return configmap.data[key]
+
+
+def maybe_string_or_ref(value, namespace):
+    # value is either a string, or
+    # {valueFrom: {<config|secret>KeyRef: {name: ..., key: ...}}}
+    try:
+        ref_type = value["valueFrom"]
+    except TypeError:
+        # It's not a dict, must be a string (or None)
+        return value
+
+    try:
+        ref = ref_type["secretKeyRef"]
+        return get_from_secret(namespace, ref["name"], ref["key"])
+    except KeyError:
+        ref = ref_type["configKeyRef"]
+        return get_from_configmap(namespace, ref["name"], ref["key"])
+    except (TypeError, KeyError):
+        pass
+
+
+def psql(*ddl, logger, secrets=None):
+    core_v1 = core_v1_api.CoreV1Api()
     for pod in core_v1.list_namespaced_pod(POSTGRES_NAMESPACE).items:
         if (
             "statefulset.kubernetes.io/pod-name" in pod.metadata.labels
@@ -94,10 +133,12 @@ def psql(*ddl, logger, secrets=None):
 @kopf.on.create("PostgreSQLUser")
 async def create(spec, **kwargs):
     logger = kwargs["logger"]
-    username = spec["username"]
+
+    username = maybe_string_or_ref(spec["username"], kwargs["namespace"])
     # If db is not set, we create a database with the same name as the user
-    db = spec.get("db", username)
-    password = spec["password"]
+    db = maybe_string_or_ref(spec.get("db"), kwargs["namespace"]) or username
+    password = maybe_string_or_ref(spec["password"], kwargs["namespace"])
+
     logger.info("Creating PostgreSQLUser '%s/%s'", username, db)
 
     psql(
@@ -110,21 +151,6 @@ async def create(spec, **kwargs):
     return {"username": username, "password": "<created>", "db": db}
 
 
-@kopf.on.delete("PostgreSQLUser")
-async def delete(spec, **kwargs):
-    logger = kwargs["logger"]
-    username = spec["username"]
-    db = spec.get("db", username)
-    logger.info("Deleting PostgreSQLUser '%s/%s'", username, db)
-
-    psql(
-        # If there are any connected sessions, this will fail: good!
-        f"DROP DATABASE IF EXISTS {db};",
-        f"DROP USER IF EXISTS {username};",
-        logger=logger,
-    )
-
-
 @kopf.on.update("PostgreSQLUser")
 async def update(spec, old, new, diff, **kwargs):
     logger = kwargs["logger"]
@@ -133,35 +159,40 @@ async def update(spec, old, new, diff, **kwargs):
     ret = {}
     secrets = []
 
-    # get current username
-    username = spec["username"]
+    # Get username from old spec, as it may have been updated
+    username = maybe_string_or_ref(old["spec"]["username"], kwargs["namespace"])
 
     for item in diff:
         op = item[0]
         obj, *tgt = item[1]
-        old = item[2]
-        new = item[3]
+        prev = maybe_string_or_ref(item[2], kwargs["namespace"])
+        nextval = maybe_string_or_ref(item[3], kwargs["namespace"])
 
-        logger.info(f"op={op}, obj={obj}, tgt={tgt}, old={old}, new={new}")
+        # This will disclose secrets...
+        logger.debug(f"op={op}, obj={obj}, tgt={tgt}, prev={prev}, nextval={nextval}")
 
         if obj == "metadata":
-            continue  # we don't care about metadata changes (labels, etc.)
+            continue  # We don't care about metadata changes (labels, etc.)
 
-        if obj == "spec" and op == "change":
-            match tgt[0]:
-                case "username":
-                    ddl.append(f"ALTER USER {old} RENAME TO {new};")
-                    username = ret["username"] = new
-                case "password":
-                    ddl.append(
-                        f"ALTER USER {username} WITH ENCRYPTED PASSWORD '{new}';"
-                    )
-                    secrets.extend([old, new])
-                    ret["password"] = "<updated>"
-                case "db":
-                    ddl.append(f"ALTER DATABASE {old} RENAME TO {new};")
-                    ret["db"] = new
+        if obj == "spec" and not op == "change":
+            continue  # We don't care (yet) about spec changes that aren't updates
 
+        match tgt[0]:
+            case "username":
+                ddl.append(f"ALTER USER {prev} RENAME TO {nextval}; -- 2")
+                ret["username"] = nextval
+            case "password":
+                ddl.append(
+                    f"ALTER USER {username} WITH ENCRYPTED PASSWORD '{nextval}'; -- 1"
+                )
+                secrets.extend([prev, nextval])
+                ret["password"] = "<updated>"
+            case "db":
+                ddl.append(f"ALTER DATABASE {prev} RENAME TO {nextval}; -- 3")
+                ret["db"] = nextval
+
+    # sort by comment number, to ensure we run in the right order
+    ddl.sort(key=lambda x: int(x[-1]))
     logger.info(f"ddl={ddl}")
 
     psql(*ddl, logger=logger, secrets=secrets)
