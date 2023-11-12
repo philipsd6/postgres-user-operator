@@ -11,7 +11,7 @@ spec:
   # Or using a configmap:
   # username:
   #   valueFrom:
-  #     configKeyRef:
+  #     configMapKeyRef:
   #       name: sample-username
   #       key: sampleuser
   # password: my-secret-password

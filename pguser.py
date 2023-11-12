@@ -75,7 +75,7 @@ def maybe_string_or_ref(value, namespace):
         ref = ref_type["secretKeyRef"]
         return get_from_secret(namespace, ref["name"], ref["key"])
     except KeyError:
-        ref = ref_type["configKeyRef"]
+        ref = ref_type["configMapKeyRef"]
         return get_from_configmap(namespace, ref["name"], ref["key"])
     except (TypeError, KeyError):
         pass
