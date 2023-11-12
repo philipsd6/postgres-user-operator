@@ -144,17 +144,24 @@ async def create(spec, **kwargs):
     # If db is not set, we create a database with the same name as the user
     db = maybe_string_or_ref(spec.get("db"), kwargs["namespace"]) or username
     password = maybe_string_or_ref(spec["password"], kwargs["namespace"])
+    superuser = spec.get("superuser", False)
 
     logger.info("Creating PostgreSQLUser '%s/%s'", username, db)
 
-    psql(
+    ddl = [
         f"CREATE USER {username} WITH ENCRYPTED PASSWORD '{password}';",
         f"CREATE DATABASE {db} OWNER {username};",
-        logger=logger,
-        secrets=[password],
-    )
+    ]
+    if superuser:
+        ddl.append(f"ALTER USER {username} WITH SUPERUSER;")
 
-    return {"username": username, "password": "<created>", "db": db}
+    psql(*ddl, logger=logger, secrets=[password])
+    return {
+        "username": username,
+        "password": "<created>",
+        "db": db,
+        "superuser": superuser,
+    }
 
 
 @kopf.on.update("PostgreSQLUser")
@@ -185,7 +192,7 @@ async def update(spec, old, new, diff, **kwargs):
 
         match tgt[0]:
             case "username":
-                ddl.append(f"ALTER USER {prev} RENAME TO {nextval}; -- 2")
+                ddl.append(f"ALTER USER {prev} RENAME TO {nextval}; -- 9")
                 ret["username"] = nextval
             case "password":
                 ddl.append(
@@ -194,10 +201,17 @@ async def update(spec, old, new, diff, **kwargs):
                 secrets.extend([prev, nextval])
                 ret["password"] = "<updated>"
             case "db":
-                ddl.append(f"ALTER DATABASE {prev} RENAME TO {nextval}; -- 3")
+                ddl.append(f"ALTER DATABASE {prev} RENAME TO {nextval}; -- 2")
                 ret["db"] = nextval
+            case "superuser":
+                ddl.append(
+                    f"ALTER USER {username} WITH {'' if nextval else 'NO '}SUPERUSER; -- 3"
+                )
+                ret["superuser"] = nextval
 
-    # sort by comment number, to ensure we run in the right order
+    # sort by comment number, to ensure we run in the right order. (We can't change the
+    # username before we change the password because we need to refer to the username,
+    # which may or may not have been changed in the meantime.)
     ddl.sort(key=lambda x: int(x[-1]))
     logger.info(f"ddl={ddl}")
 
